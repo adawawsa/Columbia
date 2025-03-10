@@ -1,4 +1,4 @@
-from flask import Flask, render_template, render_template_string, request, redirect, url_for, flash, g, send_file
+from flask import Flask, render_template, render_template_string, request, redirect, url_for, flash, g, send_file, abort
 from flask_cors import CORS # type: ignore
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user # type: ignore
 from functools import wraps
@@ -6,11 +6,21 @@ import sqlite3
 import os
 from datetime import datetime
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+
+# 環境変数の読み込み
+load_dotenv()
+
+# アップロードファイルの最大サイズ (5MB)
+MAX_CONTENT_LENGTH = 5 * 1024 * 1024
 
 app = Flask(__name__, template_folder='templates')
-app.secret_key = 'your-secret-key'  # 本番環境では安全な値に変更すること
+# 環境変数から秘密鍵を読み込む、ない場合はデフォルト値を使用（本番環境では必ず設定すること）
+app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-for-development-only')
 app.config['TEMPLATES_AUTO_RELOAD'] = True  # テンプレートの自動リロードを有効化
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # 静的ファイルのキャッシュを無効化
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH  # アップロードサイズ制限
 app.jinja_env.auto_reload = True  # Jinja2のキャッシュを無効化
 app.jinja_env.cache = {}  # キャッシュをクリア
 app.config['EXPLAIN_TEMPLATE_LOADING'] = True  # テンプレート読み込みの詳細表示
@@ -63,6 +73,10 @@ def init_db():
     db = get_db()
     c = db.cursor()
     
+    # パスワードをハッシュ化する関数
+    def hash_password(password):
+        return generate_password_hash(password)
+    
     # Check if users table exists
     c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
     users_table_exists = c.fetchone() is not None
@@ -95,6 +109,12 @@ def init_db():
             
         if 'phone' not in columns:
             c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+            
+        if 'employee_number' not in columns:
+            c.execute("ALTER TABLE users ADD COLUMN employee_number TEXT")
+            
+        if 'insurance_number' not in columns:
+            c.execute("ALTER TABLE users ADD COLUMN insurance_number TEXT")
             
         # reservationsテーブルにgroup_idカラムがあるか確認し、なければ追加
         c.execute("PRAGMA table_info(reservations)")
@@ -154,9 +174,9 @@ def init_db():
     
     # テストユーザーの追加（簡略化）
     users_data = [
-        ('test', 'test', 'テストユーザー', '総務部', 'user', 'regular', 'test@example.com'),
-        ('admin', 'admin', '管理者', '人事部', 'admin', 'regular', 'admin@example.com'),
-        ('doctor', 'doctor', '産業医', '健康管理室', 'doctor', 'regular', 'doctor@example.com')
+        ('test', hash_password('test'), 'テストユーザー', '総務部', 'user', 'regular', 'test@example.com'),
+        ('admin', hash_password('admin'), '管理者', '人事部', 'admin', 'regular', 'admin@example.com'),
+        ('doctor', hash_password('doctor'), '産業医', '健康管理室', 'doctor', 'regular', 'doctor@example.com')
     ]
     
     # 利用可能なカラムに基づいて動的にSQLを構築
@@ -177,7 +197,11 @@ def init_db():
     for user in users_data:
         # 利用可能なカラム数に基づいてデータを切り詰める
         user_data = user[:len(fields)]
-        c.execute(f'INSERT OR IGNORE INTO users ({fields_str}) VALUES ({placeholders})', user_data)
+        
+        # 既存ユーザーのパスワードを更新しないように確認
+        c.execute('SELECT id FROM users WHERE id = ?', (user_data[0],))
+        if not c.fetchone():
+            c.execute(f'INSERT INTO users ({fields_str}) VALUES ({placeholders})', user_data)
     
     db.commit()
 
@@ -312,7 +336,9 @@ def get_employee_reservation_status():
                     FROM reservations r 
                     WHERE r.user_id = u.id AND r.status = 'approved' 
                     ORDER BY preferred_date DESC LIMIT 1
-                ) as latest_exam_type
+                ) as latest_exam_type,
+                u.employee_number,
+                u.insurance_number
             FROM users u
             WHERE u.role != 'admin' AND u.role != 'doctor'
             ORDER BY u.department, u.name
@@ -380,14 +406,31 @@ def get_user_by_id(user_id):
 def verify_user(user_id, password):
     conn = sqlite3.connect('health_check.db')
     c = conn.cursor()
-    c.execute('SELECT id, name, department, role, work_type, email, phone FROM users WHERE id = ? AND password = ?', 
-             (user_id, password))
-    user_data = c.fetchone()
-    conn.close()
-    if user_data:
-        return User(user_data[0], user_data[1], user_data[2], user_data[3], 
-                   user_data[4], user_data[5], user_data[6])
-    return None
+    try:
+        # ユーザー情報を取得
+        c.execute('SELECT id, name, department, role, work_type, email, phone, password FROM users WHERE id = ?', (user_id,))
+        user_data = c.fetchone()
+        
+        if not user_data:
+            return None
+        
+        stored_password = user_data[7]
+        
+        # パスワードの検証
+        if stored_password.startswith(('pbkdf2:', 'scrypt:')):
+            # ハッシュ化されたパスワードの検証
+            if check_password_hash(stored_password, password):
+                return User(user_data[0], user_data[1], user_data[2], user_data[3], 
+                          user_data[4], user_data[5], user_data[6])
+        else:
+            # 移行期間中の平文パスワード検証（将来的に削除）
+            if stored_password == password:
+                return User(user_data[0], user_data[1], user_data[2], user_data[3], 
+                          user_data[4], user_data[5], user_data[6])
+        
+        return None
+    finally:
+        conn.close()
 
 def admin_required(f):
     @wraps(f)
@@ -591,12 +634,15 @@ def update_profile():
         c.execute('SELECT password FROM users WHERE id = ?', (current_user.id,))
         stored_password = c.fetchone()[0]
         
-        if stored_password != current_password:
+        # パスワードハッシュの検証
+        if not check_password_hash(stored_password, current_password):
             flash('現在のパスワードが正しくありません', 'danger')
             conn.close()
             return redirect(url_for('profile'))
         
-        c.execute('UPDATE users SET password = ? WHERE id = ?', (new_password, current_user.id))
+        # 新しいパスワードのハッシュ化
+        hashed_password = generate_password_hash(new_password)
+        c.execute('UPDATE users SET password = ? WHERE id = ?', (hashed_password, current_user.id))
         flash('パスワードが更新されました', 'success')
     
     # プロフィール情報の更新
@@ -606,6 +652,50 @@ def update_profile():
     
     flash('プロフィール情報が更新されました', 'success')
     return redirect(url_for('profile'))
+
+@app.route('/admin/view_result/<int:result_id>')
+@login_required
+@admin_required
+def view_result(result_id):
+    """健康診断結果ファイルを表示する"""
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    c.execute('''
+        SELECT file_path FROM exam_results WHERE id = ?
+    ''', (result_id,))
+    result = c.fetchone()
+    conn.close()
+    
+    if not result:
+        flash('ファイルが見つかりません', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    
+    file_path = result[0]
+    if not os.path.exists(file_path):
+        flash('ファイルが存在しません', 'danger')
+        return redirect(url_for('admin_dashboard'))
+    
+    return send_file(file_path, as_attachment=True)
+
+@app.route('/admin/mark_reviewed/<int:result_id>')
+@login_required
+@admin_required
+def mark_reviewed(result_id):
+    """健康診断結果を確認済みにする"""
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    c.execute('''
+        UPDATE exam_results 
+        SET review_status = 'reviewed', 
+            reviewer_id = ?, 
+            review_date = CURRENT_TIMESTAMP
+        WHERE id = ?
+    ''', (current_user.id, result_id))
+    conn.commit()
+    conn.close()
+    
+    flash('健康診断結果を確認済みにしました', 'success')
+    return redirect(url_for('admin_dashboard'))
 
 @app.route('/group_reservations')
 @login_required

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "admin_base.html" %}
 
 {% block title %}健康診断管理システム - 管理者ダッシュボード{% endblock %}
 
@@ -258,9 +258,9 @@ tr:last-child td {
                     </span>
                 </td>
                 <td>
-                    <button class="btn btn-view" onclick="alert('この機能は現在実装中です')">結果を確認</button>
+                    <a href="{{ url_for('view_result', result_id=result[0]) }}" class="btn btn-view">結果を確認</a>
                     {% if result[4] != 'reviewed' %}
-                    <button class="btn btn-mark" onclick="alert('この機能は現在実装中です')">確認済みにする</button>
+                    <a href="{{ url_for('mark_reviewed', result_id=result[0]) }}" class="btn btn-mark">確認済みにする</a>
                     {% endif %}
                 </td>
             </tr>
@@ -288,6 +288,8 @@ tr:last-child td {
                     <thead>
                         <tr>
                             <th>社員名</th>
+                            <th>社員番号</th>
+                            <th>保険証番号</th>
                             <th>勤務形態</th>
                             <th>最新の健診</th>
                             <th>健診種別</th>
@@ -298,6 +300,8 @@ tr:last-child td {
                         {% for emp in employees %}
                         <tr>
                             <td>{{ emp[1] }}</td>
+                            <td>{{ emp[7] if emp[7] else '未登録' }}</td>
+                            <td>{{ emp[8] if emp[8] else '未登録' }}</td>
                             <td>{{ '深夜勤務' if emp[3] == 'night' else '通常勤務' }}</td>
                             <td>{{ emp[5] if emp[5] else '未実施' }}</td>
                             <td>{{ emp[6] if emp[6] else '-' }}</td>
