@@ -1,29 +1,107 @@
-from flask import Flask, render_template_string, request, redirect, url_for, flash
-from flask_cors import CORS
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask import Flask, render_template, render_template_string, request, redirect, url_for, flash, g, send_file
+from flask_cors import CORS # type: ignore
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user # type: ignore
 from functools import wraps
 import sqlite3
+import os
 from datetime import datetime
+from werkzeug.utils import secure_filename
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates')
 app.secret_key = 'your-secret-key'  # 本番環境では安全な値に変更すること
+app.config['TEMPLATES_AUTO_RELOAD'] = True  # テンプレートの自動リロードを有効化
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # 静的ファイルのキャッシュを無効化
+app.jinja_env.auto_reload = True  # Jinja2のキャッシュを無効化
+app.jinja_env.cache = {}  # キャッシュをクリア
+app.config['EXPLAIN_TEMPLATE_LOADING'] = True  # テンプレート読み込みの詳細表示
+
+# 強制的にキャッシュを無効化する設定
+@app.after_request
+def add_header(response):
+    """
+    キャッシュ無効化ヘッダーを追加
+    """
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers['Cache-Control'] = 'public, max-age=0'
+    return response
 CORS(app)
 
+# テンプレートのリロードを強制するためのヘルパー関数
+@app.context_processor
+def override_url_for():
+    return dict(url_for=dated_url_for)
+
+def dated_url_for(endpoint, **values):
+    if endpoint == 'static':
+        values['q'] = int(datetime.utcnow().timestamp())
+    return url_for(endpoint, **values)
+
+# アップロードされたファイルを保存するディレクトリ
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg', 'png'}
+
+# アップロードディレクトリが存在しない場合は作成
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+# データベース接続の取得
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect('health_check.db')
+        g.db.row_factory = sqlite3.Row  # 結果をディクショナリ形式で取得するための設定
+    return g.db
+
+# アプリケーションコンテキスト終了時にDBコネクションをクローズ
+@app.teardown_appcontext
+def close_db(error):
+    if 'db' in g:
+        g.db.close()
+
 def init_db():
-    conn = sqlite3.connect('health_check.db')
-    c = conn.cursor()
+    db = get_db()
+    c = db.cursor()
+    
+    # Check if users table exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    users_table_exists = c.fetchone() is not None
     
     # ユーザーテーブル
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            name TEXT NOT NULL,
-            department TEXT,
-            role TEXT DEFAULT 'user',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+    if not users_table_exists:
+        c.execute('''
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                name TEXT NOT NULL,
+                department TEXT,
+                role TEXT DEFAULT 'user',
+                work_type TEXT DEFAULT 'regular',
+                email TEXT,
+                phone TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    else:
+        # Check if columns exist and add them if they don't
+        c.execute("PRAGMA table_info(users)")
+        columns = [column[1] for column in c.fetchall()]
+    
+        if 'work_type' not in columns:
+            c.execute("ALTER TABLE users ADD COLUMN work_type TEXT DEFAULT 'regular'")
+        
+        if 'email' not in columns:
+            c.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            
+        if 'phone' not in columns:
+            c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+            
+        # reservationsテーブルにgroup_idカラムがあるか確認し、なければ追加
+        c.execute("PRAGMA table_info(reservations)")
+        res_columns = [column[1] for column in c.fetchall()]
+        
+        if 'group_id' not in res_columns:
+            c.execute("ALTER TABLE reservations ADD COLUMN group_id INTEGER")
     
     # 予約テーブル
     c.execute('''
@@ -35,21 +113,73 @@ def init_db():
             preferred_time TIME NOT NULL,
             notes TEXT,
             status TEXT DEFAULT 'pending',
+            group_id INTEGER, -- グループ予約の場合のグループID
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (group_id) REFERENCES reservation_groups (id)
         )
     ''')
     
-    # テストユーザーの追加
-    c.execute('INSERT OR IGNORE INTO users (id, password, name, department, role) VALUES (?, ?, ?, ?, ?)',
-             ('test', 'test', 'テストユーザー', '総務部', 'user'))
+    # グループ予約テーブル
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS reservation_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            department TEXT,
+            created_by TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+    ''')
     
-    # 管理者ユーザーの追加
-    c.execute('INSERT OR IGNORE INTO users (id, password, name, department, role) VALUES (?, ?, ?, ?, ?)',
-             ('admin', 'admin', '管理者', '人事部', 'admin'))
+    # 健康診断結果テーブル
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS exam_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reservation_id INTEGER NOT NULL,
+            file_path TEXT NOT NULL,
+            upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            review_status TEXT DEFAULT 'pending', -- pending, reviewed
+            reviewer_id TEXT,
+            review_date TIMESTAMP,
+            comments TEXT,
+            FOREIGN KEY (reservation_id) REFERENCES reservations (id),
+            FOREIGN KEY (reviewer_id) REFERENCES users (id)
+        )
+    ''')
     
-    conn.commit()
-    conn.close()
+    # Check which columns exist before inserting
+    c.execute("PRAGMA table_info(users)")
+    columns = [column[1] for column in c.fetchall()]
+    
+    # テストユーザーの追加（簡略化）
+    users_data = [
+        ('test', 'test', 'テストユーザー', '総務部', 'user', 'regular', 'test@example.com'),
+        ('admin', 'admin', '管理者', '人事部', 'admin', 'regular', 'admin@example.com'),
+        ('doctor', 'doctor', '産業医', '健康管理室', 'doctor', 'regular', 'doctor@example.com')
+    ]
+    
+    # 利用可能なカラムに基づいて動的にSQLを構築
+    has_work_type = 'work_type' in columns
+    has_email = 'email' in columns
+    
+    fields = ['id', 'password', 'name', 'department', 'role']
+    if has_work_type:
+        fields.append('work_type')
+    if has_email:
+        fields.append('email')
+    
+    # フィールド名とプレースホルダーを構築
+    fields_str = ', '.join(fields)
+    placeholders = ', '.join(['?'] * len(fields))
+    
+    # ユーザーデータの挿入
+    for user in users_data:
+        # 利用可能なカラム数に基づいてデータを切り詰める
+        user_data = user[:len(fields)]
+        c.execute(f'INSERT OR IGNORE INTO users ({fields_str}) VALUES ({placeholders})', user_data)
+    
+    db.commit()
 
 def get_all_reservations():
     conn = sqlite3.connect('health_check.db')
@@ -63,20 +193,15 @@ def get_all_reservations():
                 r.preferred_time,
                 r.status,
                 r.created_at,
-                r.created_at,
                 u.name,
                 u.department
             FROM reservations r
             JOIN users u ON r.user_id = u.id
             ORDER BY r.created_at DESC
         ''')
-        reservations = c.fetchall()
-        print(f"Found {len(reservations)} reservations")  # デバッグ用
-        for res in reservations:  # デバッグ用
-            print(f"Reservation: {res}")
-        return reservations
+        return c.fetchall()
     except Exception as e:
-        print(f"Error fetching reservations: {e}")  # デバッグ用
+        print(f"Error fetching reservations: {e}")
         return []
     finally:
         conn.close()
@@ -132,41 +257,136 @@ def get_next_exam_date(user_id):
     conn.close()
     return result[0] if result else None
 
-# データベースの初期化
-init_db()
+def get_all_exam_results():
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    try:
+        c.execute('''
+            SELECT 
+                er.id,
+                er.reservation_id,
+                er.file_path,
+                er.upload_date,
+                er.review_status,
+                u.name as user_name,
+                u.department,
+                r.exam_type,
+                r.preferred_date
+            FROM exam_results er
+            JOIN reservations r ON er.reservation_id = r.id
+            JOIN users u ON r.user_id = u.id
+            ORDER BY er.upload_date DESC
+        ''')
+        results = c.fetchall()
+        return results
+    except Exception as e:
+        print(f"Error fetching exam results: {e}")
+        return []
+    finally:
+        conn.close()
+
+def get_employee_reservation_status():
+    """全社員の健診予約状況を取得する"""
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    try:
+        # 全社員を取得
+        c.execute('''
+            SELECT 
+                u.id,
+                u.name,
+                u.department,
+                u.work_type,
+                (
+                    SELECT COUNT(*) 
+                    FROM reservations r 
+                    WHERE r.user_id = u.id AND r.status = 'approved'
+                ) as has_approved,
+                (
+                    SELECT MAX(preferred_date) 
+                    FROM reservations r 
+                    WHERE r.user_id = u.id AND r.status = 'approved'
+                ) as latest_exam_date,
+                (
+                    SELECT exam_type 
+                    FROM reservations r 
+                    WHERE r.user_id = u.id AND r.status = 'approved' 
+                    ORDER BY preferred_date DESC LIMIT 1
+                ) as latest_exam_type
+            FROM users u
+            WHERE u.role != 'admin' AND u.role != 'doctor'
+            ORDER BY u.department, u.name
+        ''')
+        employees = c.fetchall()
+        
+        # 部署ごとにグループ化（辞書内包表記を使用して簡略化）
+        departments = {}
+        for emp in employees:
+            dept = emp[2] or '未所属'
+            departments.setdefault(dept, []).append(emp)
+        
+        return departments
+    except Exception as e:
+        print(f"Error fetching employee reservation status: {e}")
+        return {}
+    finally:
+        conn.close()
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 login_manager = LoginManager()
 login_manager.init_app(app)
+
+# データベースの初期化はアプリケーションコンテキスト内で行う
+with app.app_context():
+    init_db()
 login_manager.login_view = 'index'
 
 class User(UserMixin):
-    def __init__(self, id, name, department, role):
+    def __init__(self, id, name, department, role, work_type=None, email=None, phone=None):
         self.id = id
         self.name = name
         self.department = department
         self.role = role
+        self.work_type = work_type
+        self.email = email
+        self.phone = phone
     
     def is_admin(self):
         return self.role == 'admin'
+    
+    def is_doctor(self):
+        return self.role == 'doctor'
+    
+    def get_exam_type(self):
+        """勤務形態に基づいて適切な健診種別を返す"""
+        if self.work_type == 'night':
+            return '特殊健康診断'
+        return '定期健康診断'
 
 def get_user_by_id(user_id):
     conn = sqlite3.connect('health_check.db')
     c = conn.cursor()
-    c.execute('SELECT id, name, department, role FROM users WHERE id = ?', (user_id,))
+    c.execute('SELECT id, name, department, role, work_type, email, phone FROM users WHERE id = ?', (user_id,))
     user_data = c.fetchone()
     conn.close()
     if user_data:
-        return User(user_data[0], user_data[1], user_data[2], user_data[3])
+        return User(user_data[0], user_data[1], user_data[2], user_data[3], 
+                   user_data[4], user_data[5], user_data[6])
     return None
 
 def verify_user(user_id, password):
     conn = sqlite3.connect('health_check.db')
     c = conn.cursor()
-    c.execute('SELECT id, name, department, role FROM users WHERE id = ? AND password = ?', (user_id, password))
+    c.execute('SELECT id, name, department, role, work_type, email, phone FROM users WHERE id = ? AND password = ?', 
+             (user_id, password))
     user_data = c.fetchone()
     conn.close()
     if user_data:
-        return User(user_data[0], user_data[1], user_data[2], user_data[3])
+        return User(user_data[0], user_data[1], user_data[2], user_data[3], 
+                   user_data[4], user_data[5], user_data[6])
     return None
 
 def admin_required(f):
@@ -182,111 +402,15 @@ def admin_required(f):
 def load_user(user_id):
     return get_user_by_id(user_id)
 
-# HTML template with modern, gradient design
-HTML_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>健康診断管理システム - ログイン</title>
-    <style>
-        .error-message {
-            color: #e53e3e;
-            text-align: center;
-            margin-bottom: 1rem;
-            font-weight: 500;
-        }
-        body {
-            margin: 0;
-            padding: 0;
-            min-height: 100vh;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        .login-container {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 400px;
-            backdrop-filter: blur(10px);
-        }
-        h1 {
-            color: #2d3748;
-            text-align: center;
-            margin-bottom: 2rem;
-            font-weight: 600;
-        }
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-        label {
-            display: block;
-            color: #4a5568;
-            margin-bottom: 0.5rem;
-            font-weight: 500;
-        }
-        input {
-            width: 100%;
-            padding: 0.75rem;
-            border: 2px solid #e2e8f0;
-            border-radius: 6px;
-            font-size: 1rem;
-            transition: border-color 0.2s;
-        }
-        input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        button {
-            width: 100%;
-            padding: 0.75rem;
-            background: linear-gradient(to right, #667eea, #764ba2);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        button:hover {
-            transform: translateY(-1px);
-        }
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <h1>健康診断管理システム</h1>
-        {% if error %}
-        <div class="error-message">{{ error }}</div>
-        {% endif %}
-        <form method="post" action="/login">
-            <div class="form-group">
-                <label for="employee_id">社員ID</label>
-                <input type="text" id="employee_id" name="employee_id" required placeholder="テストID: test">
-            </div>
-            <div class="form-group">
-                <label for="password">パスワード</label>
-                <input type="password" id="password" name="password" required placeholder="テストパスワード: test">
-            </div>
-            <button type="submit">ログイン</button>
-        </form>
-    </div>
-</body>
-</html>
-'''
-
+# ルート定義
 @app.route('/')
 def index():
+    print("=== DEBUG: Using template login.html ===")
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
-    return render_template_string(HTML_TEMPLATE)
+    
+    # テンプレートを使用する
+    return render_template('login.html')
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -296,9 +420,12 @@ def login():
     user = verify_user(employee_id, password)
     if user:
         login_user(user)
+        if user.is_admin():
+            return redirect(url_for('admin_dashboard'))
         return redirect(url_for('dashboard'))
     else:
-        return render_template_string(HTML_TEMPLATE, error="ユーザーIDまたはパスワードが正しくありません")
+        flash('ユーザーIDまたはパスワードが正しくありません', 'danger')
+        return render_template('login.html')
 
 @app.route('/logout')
 @login_required
@@ -313,75 +440,25 @@ def dashboard():
     stats = count_reservations_by_status(current_user.id)
     reservations = get_user_reservations(current_user.id)
     
-    return render_template_string(
-        DASHBOARD_TEMPLATE,
-        employee_id=current_user.name,
-        department=current_user.department,
-        pending_count=stats['pending'],
-        approved_count=stats['approved'],
-        next_exam=stats['next_exam'],
-        reservations=reservations
-    )
-
-@app.route('/reservation', methods=['GET'])
-@login_required
-def reservation():
-    if current_user.is_admin():
-        flash('管理者は予約申請できません')
-        return redirect(url_for('admin_dashboard'))
-    return render_template_string(
-        RESERVATION_TEMPLATE,
-        employee_id=current_user.name,
-        department=current_user.department
-    )
-
-@app.route('/submit_reservation', methods=['POST'])
-@login_required
-def submit_reservation():
-    if current_user.is_admin():
-        flash('管理者は予約申請できません')
-        return redirect(url_for('admin_dashboard'))
-
-    exam_type = request.form.get('exam_type')
-    preferred_date = request.form.get('preferred_date')
-    preferred_time = request.form.get('preferred_time')
-    notes = request.form.get('notes')
-    
-    conn = sqlite3.connect('health_check.db')
-    c = conn.cursor()
-    try:
-        c.execute('''
-            INSERT INTO reservations 
-            (user_id, exam_type, preferred_date, preferred_time, notes, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (current_user.id, exam_type, preferred_date, preferred_time, notes, 'pending'))
-        conn.commit()
-        flash('予約申請を受け付けました。')
-    except Exception as e:
-        flash('予約申請に失敗しました。')
-        print(f"Error: {e}")
-    finally:
-        conn.close()
-    
-    return redirect(url_for('dashboard'))
+    return render_template('dashboard.html', stats=stats, reservations=reservations)
 
 @app.route('/admin/dashboard')
 @login_required
 @admin_required
 def admin_dashboard():
     reservations = get_all_reservations()
-    return render_template_string(ADMIN_TEMPLATE, 
-        employee_id=current_user.name,
-        department=current_user.department,
-        reservations=reservations
-    )
+    exam_results = get_all_exam_results()
+    employee_status = get_employee_reservation_status()
+    
+    return render_template('admin_dashboard.html', reservations=reservations, 
+                           exam_results=exam_results, employee_status=employee_status)
 
 @app.route('/admin/approve/<int:reservation_id>')
 @login_required
 @admin_required
 def approve_reservation(reservation_id):
     update_reservation_status(reservation_id, 'approved')
-    flash('予約を承認しました。')
+    flash('予約を承認しました。', 'success')
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/reject/<int:reservation_id>')
@@ -389,783 +466,182 @@ def approve_reservation(reservation_id):
 @admin_required
 def reject_reservation(reservation_id):
     update_reservation_status(reservation_id, 'rejected')
-    flash('予約を却下しました。')
+    flash('予約を却下しました。', 'error')
     return redirect(url_for('admin_dashboard'))
 
-# 管理者用ダッシュボードのテンプレート
-ADMIN_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>健康診断管理システム - 管理者ダッシュボード</title>
-    <style>
-        :root {
-            --primary-color: #667eea;
-            --secondary-color: #764ba2;
-            --text-color: #2d3748;
-            --sidebar-width: 250px;
-        }
-        
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background: #f7fafc;
-        }
-        
-        .header {
-            position: fixed;
-            top: 0;
-            left: var(--sidebar-width);
-            right: 0;
-            height: 60px;
-            background: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 2rem;
-            z-index: 100;
-        }
-        
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-        
-        .logout-btn {
-            padding: 0.5rem 1rem;
-            background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-        }
-        
-        .sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: var(--sidebar-width);
-            height: 100vh;
-            background: white;
-            box-shadow: 2px 0 4px rgba(0,0,0,0.1);
-            padding-top: 2rem;
-        }
-        
-        .logo {
-            text-align: center;
-            padding: 1rem;
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-        
-        .nav-menu {
-            list-style: none;
-            padding: 0;
-            margin: 2rem 0;
-        }
-        
-        .nav-item {
-            padding: 1rem 2rem;
-            color: var(--text-color);
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        
-        .nav-item:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: var(--primary-color);
-        }
-        
-        .nav-item a {
-            text-decoration: none;
-            color: inherit;
-            display: block;
-        }
-        
-        .main-content {
-            margin-left: var(--sidebar-width);
-            margin-top: 60px;
-            padding: 2rem;
-        }
-        
-        .applications-list {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            padding: 1.5rem;
-        }
-        
-        .applications-list h2 {
-            margin: 0 0 1.5rem 0;
-            color: var(--text-color);
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        th, td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid #e2e8f0;
-        }
-        
-        th {
-            background: #f8fafc;
-            font-weight: 600;
-        }
-        
-        tr:hover {
-            background: #f8fafc;
-        }
-        
-        .status-badge {
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-        
-        .status-pending {
-            background: #fef3c7;
-            color: #92400e;
-        }
-        
-        .status-approved {
-            background: #dcfce7;
-            color: #166534;
-        }
-        
-        .status-rejected {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-        
-        .action-buttons {
-            display: flex;
-            gap: 0.5rem;
-        }
-        
-        .btn {
-            padding: 0.25rem 0.75rem;
-            border-radius: 6px;
-            font-size: 0.875rem;
-            text-decoration: none;
-            cursor: pointer;
-        }
-        
-        .btn-approve {
-            background: #dcfce7;
-            color: #166534;
-        }
-        
-        .btn-reject {
-            background: #fee2e2;
-            color: #991b1b;
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="logo">健康診断管理システム</div>
-        <ul class="nav-menu">
-            <li class="nav-item"><a href="/admin/dashboard">管理者ダッシュボード</a></li>
-            <li class="nav-item"><a href="/dashboard">ユーザーダッシュボード</a></li>
-            <li class="nav-item"><a href="#">ユーザー管理</a></li>
-            <li class="nav-item"><a href="#">システム設定</a></li>
-        </ul>
-    </div>
+@app.route('/reservation')
+@login_required
+def reservation():
+    # 部署リストの取得
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    c.execute('SELECT DISTINCT department FROM users WHERE department IS NOT NULL')
+    departments = [dept[0] for dept in c.fetchall()]
+    conn.close()
     
-    <header class="header">
-        <div class="user-info">
-            <span>{{ employee_id }} (管理者)</span>
-            <a href="/logout" class="logout-btn">ログアウト</a>
-        </div>
-    </header>
+    # 勤務形態に基づく推奨健診タイプ
+    recommended_exam_type = current_user.get_exam_type()
     
-    <main class="main-content">
-        <div class="applications-list">
-            <h2>予約申請一覧</h2>
-            {% if reservations %}
-            <table>
-                <thead>
-                    <tr>
-                        <th>申請日</th>
-                        <th>社員名</th>
-                        <th>所属</th>
-                        <th>健診種別</th>
-                        <th>希望日時</th>
-                        <th>ステータス</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for reservation in reservations %}
-                    <tr>
-                        <td>{{ reservation[6] }}</td>
-                        <td>{{ reservation[7] }}</td>
-                        <td>{{ reservation[8] }}</td>
-                        <td>{{ reservation[1] }}</td>
-                        <td>{{ reservation[2] }} {{ reservation[3] }}</td>
-                        <td>
-                            <span class="status-badge status-{{ reservation[4] }}">
-                                {{ '承認済' if reservation[4] == 'approved' else '却下' if reservation[4] == 'rejected' else '申請中' }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if reservation[4] == 'pending' %}
-                            <div class="action-buttons">
-                                <a href="/admin/approve/{{ reservation[0] }}" class="btn btn-approve">承認</a>
-                                <a href="/admin/reject/{{ reservation[0] }}" class="btn btn-reject">却下</a>
-                            </div>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p style="text-align: center; color: #666; padding: 2rem;">予約申請はありません</p>
-            {% endif %}
-        </div>
-    </main>
-</body>
-</html>
-'''
+    return render_template('reservation.html', 
+                           departments=departments, 
+                           recommended_exam_type=recommended_exam_type)
 
-# 予約申請画面のテンプレート
-RESERVATION_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>健康診断管理システム - 予約申請</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ja.js"></script>
-    <style>
-        :root {
-            --primary-color: #667eea;
-            --secondary-color: #764ba2;
-            --text-color: #2d3748;
-            --sidebar-width: 250px;
-        }
-        
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background: #f7fafc;
-        }
-        
-        .header {
-            position: fixed;
-            top: 0;
-            left: var(--sidebar-width);
-            right: 0;
-            height: 60px;
-            background: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 2rem;
-            z-index: 100;
-        }
-        
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-        
-        .logout-btn {
-            padding: 0.5rem 1rem;
-            background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-        
-        .sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: var(--sidebar-width);
-            height: 100vh;
-            background: white;
-            box-shadow: 2px 0 4px rgba(0,0,0,0.1);
-            padding-top: 2rem;
-        }
-        
-        .logo {
-            text-align: center;
-            padding: 1rem;
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-        
-        .nav-menu {
-            list-style: none;
-            padding: 0;
-            margin: 2rem 0;
-        }
-        
-        .nav-item {
-            padding: 1rem 2rem;
-            color: var(--text-color);
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        
-        .nav-item:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: var(--primary-color);
-        }
-        
-        .main-content {
-            margin-left: var(--sidebar-width);
-            margin-top: 60px;
-            padding: 2rem;
-        }
-
-        .reservation-form {
-            background: white;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            max-width: 800px;
-            margin: 0 auto;
-        }
-
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: var(--text-color);
-            font-weight: 500;
-        }
-
-        .form-control {
-            width: 100%;
-            padding: 0.75rem;
-            border: 2px solid #e2e8f0;
-            border-radius: 6px;
-            font-size: 1rem;
-            transition: border-color 0.2s;
-        }
-
-        .form-control:focus {
-            outline: none;
-            border-color: var(--primary-color);
-        }
-
-        select.form-control {
-            background-color: white;
-        }
-
-        textarea.form-control {
-            min-height: 100px;
-            resize: vertical;
-        }
-
-        .submit-btn {
-            display: block;
-            width: 100%;
-            padding: 1rem;
-            background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .submit-btn:hover {
-            transform: translateY(-1px);
-        }
-
-        .form-title {
-            margin: 0 0 2rem 0;
-            color: var(--text-color);
-            text-align: center;
-        }
-
-        .time-slots {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 1rem;
-            margin-top: 0.5rem;
-        }
-
-        .time-slot {
-            padding: 0.5rem;
-            border: 2px solid #e2e8f0;
-            border-radius: 6px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .time-slot:hover {
-            border-color: var(--primary-color);
-            background: rgba(102, 126, 234, 0.1);
-        }
-
-        .time-slot.selected {
-            background: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="logo">健康診断管理システム</div>
-        <ul class="nav-menu">
-            <li class="nav-item"><a href="/dashboard" style="text-decoration: none; color: inherit;">ダッシュボード</a></li>
-            <li class="nav-item"><a href="/reservation" style="text-decoration: none; color: inherit;">健診予約申請</a></li>
-            <li class="nav-item"><a href="#" style="text-decoration: none; color: inherit;">結果確認</a></li>
-            <li class="nav-item"><a href="#" style="text-decoration: none; color: inherit;">履歴</a></li>
-            <li class="nav-item"><a href="#" style="text-decoration: none; color: inherit;">設定</a></li>
-        </ul>
-    </div>
+@app.route('/submit_reservation', methods=['POST'])
+@login_required
+def submit_reservation():
+    exam_type = request.form.get('exam_type')
+    preferred_date = request.form.get('preferred_date')
+    preferred_time = request.form.get('preferred_time')
+    notes = request.form.get('notes')
+    is_group = request.form.get('is_group') == 'on'
+    group_department = request.form.get('group_department')
     
-    <header class="header">
-        <div class="user-info">
-            <span>{{ employee_id }}</span>
-            <a href="/logout" class="logout-btn" style="text-decoration: none;">ログアウト</a>
-        </div>
-    </header>
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
     
-    <main class="main-content">
-        <form class="reservation-form" action="/submit_reservation" method="POST">
-            <h2 class="form-title">健康診断予約申請</h2>
-            
-            <div class="form-group">
-                <label for="exam_type">健診種別</label>
-                <select id="exam_type" name="exam_type" class="form-control" required>
-                    <option value="">選択してください</option>
-                    <option value="定期健康診断">定期健康診断</option>
-                    <option value="特殊健康診断">特殊健康診断</option>
-                    <option value="特定健康診断">特定健康診断</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label for="preferred_date">希望日</label>
-                <input type="text" id="preferred_date" name="preferred_date" class="form-control" required>
-            </div>
-
-            <div class="form-group">
-                <label>希望時間帯</label>
-                <div class="time-slots">
-                    <div class="time-slot" data-time="09:00">09:00</div>
-                    <div class="time-slot" data-time="10:00">10:00</div>
-                    <div class="time-slot" data-time="11:00">11:00</div>
-                    <div class="time-slot" data-time="13:00">13:00</div>
-                    <div class="time-slot" data-time="14:00">14:00</div>
-                    <div class="time-slot" data-time="15:00">15:00</div>
-                </div>
-                <input type="hidden" id="preferred_time" name="preferred_time" required>
-            </div>
-
-            <div class="form-group">
-                <label for="notes">備考</label>
-                <textarea id="notes" name="notes" class="form-control" placeholder="特記事項があればご記入ください"></textarea>
-            </div>
-
-            <button type="submit" class="submit-btn">予約を申請する</button>
-        </form>
-    </main>
-
-    <script>
-        // カレンダーの初期化
-        flatpickr("#preferred_date", {
-            locale: "ja",
-            dateFormat: "Y/m/d",
-            minDate: "today",
-            disable: [
-                function(date) {
-                    return (date.getDay() === 0 || date.getDay() === 6);
-                }
-            ]
-        });
-
-        // 時間帯選択の処理
-        document.querySelectorAll('.time-slot').forEach(slot => {
-            slot.addEventListener('click', function() {
-                document.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'));
-                this.classList.add('selected');
-                document.getElementById('preferred_time').value = this.dataset.time;
-            });
-        });
-    </script>
-</body>
-</html>
-'''
-
-# ダッシュボード画面のテンプレート
-DASHBOARD_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>健康診断管理システム - ダッシュボード</title>
-    <style>
-        :root {
-            --primary-color: #667eea;
-            --secondary-color: #764ba2;
-            --text-color: #2d3748;
-            --sidebar-width: 250px;
-        }
-        
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            background: #f7fafc;
-        }
-
-        .nav-item a {
-            display: block;
-            width: 100%;
-            height: 100%;
-            text-decoration: none;
-            color: inherit;
-        }
-        
-        .header {
-            position: fixed;
-            top: 0;
-            left: var(--sidebar-width);
-            right: 0;
-            height: 60px;
-            background: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 2rem;
-            z-index: 100;
-        }
-        
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-        
-        .logout-btn {
-            padding: 0.5rem 1rem;
-            background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-        }
-        
-        .sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: var(--sidebar-width);
-            height: 100vh;
-            background: white;
-            box-shadow: 2px 0 4px rgba(0,0,0,0.1);
-            padding-top: 2rem;
-        }
-        
-        .logo {
-            text-align: center;
-            padding: 1rem;
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-        
-        .nav-menu {
-            list-style: none;
-            padding: 0;
-            margin: 2rem 0;
-        }
-        
-        .nav-item {
-            padding: 1rem 2rem;
-            color: var(--text-color);
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        
-        .nav-item:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: var(--primary-color);
-        }
-        
-        .main-content {
-            margin-left: var(--sidebar-width);
-            margin-top: 60px;
-            padding: 2rem;
-        }
-        
-        .dashboard-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        
-        .stat-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .stat-card h3 {
-            margin: 0 0 1rem 0;
-            color: var(--text-color);
-        }
-        
-        .stat-value {
-            font-size: 2rem;
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-        
-        .applications-list {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            padding: 1.5rem;
-        }
-        
-        .applications-list h2 {
-            margin: 0 0 1.5rem 0;
-            color: var(--text-color);
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        
-        th, td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid #e2e8f0;
-        }
-        
-        th {
-            background: #f8fafc;
-            font-weight: 600;
-        }
-        
-        tr:hover {
-            background: #f8fafc;
-        }
-        
-        .status-badge {
-            padding: 0.25rem 0.75rem;
-            border-radius: 9999px;
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-        
-        .status-pending {
-            background: #fef3c7;
-            color: #92400e;
-        }
-        
-        .status-approved {
-            background: #dcfce7;
-            color: #166534;
-        }
-    </style>
-</head>
-<body>
-    <div class="sidebar">
-        <div class="logo">健康診断管理システム</div>
-        <ul class="nav-menu">
-            <li class="nav-item"><a href="/dashboard">ダッシュボード</a></li>
-            <li class="nav-item"><a href="/reservation">健診予約申請</a></li>
-            <li class="nav-item"><a href="#">結果確認</a></li>
-            <li class="nav-item"><a href="#">履歴</a></li>
-            <li class="nav-item"><a href="#">設定</a></li>
-        </ul>
-    </div>
+    group_id = None
+    if is_group:
+        c.execute('INSERT INTO reservation_groups (name, department, created_by) VALUES (?, ?, ?)',
+                 (f"{group_department}健康診断予約", group_department, current_user.id))
+        group_id = c.lastrowid
     
-    <header class="header">
-        <div class="user-info">
-            <span>{{ employee_id }}</span>
-            <a href="/logout" class="logout-btn" style="text-decoration: none;">ログアウト</a>
-        </div>
-    </header>
+    c.execute('''
+        INSERT INTO reservations 
+        (user_id, exam_type, preferred_date, preferred_time, notes, group_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (current_user.id, exam_type, preferred_date, preferred_time, notes, group_id))
     
-    <main class="main-content">
-        <div class="dashboard-grid">
-            <div class="stat-card">
-                <h3>申請中の予約</h3>
-                <div class="stat-value">{{ pending_count }}</div>
-            </div>
-            <div class="stat-card">
-                <h3>承認済み予約</h3>
-                <div class="stat-value">{{ approved_count }}</div>
-            </div>
-            <div class="stat-card">
-                <h3>次回の健診予定</h3>
-                <div class="stat-value">{{ next_exam if next_exam else '未定' }}</div>
-            </div>
-        </div>
-        
-        <div class="applications-list">
-            <h2>申請状況一覧</h2>
-            {% if reservations %}
-            <table>
-                <thead>
-                    <tr>
-                        <th>申請日</th>
-                        <th>健診種別</th>
-                        <th>希望日時</th>
-                        <th>ステータス</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for exam_type, preferred_date, preferred_time, status, created_at in reservations %}
-                    <tr>
-                        <td>{{ created_at.split(' ')[0] }}</td>
-                        <td>{{ exam_type }}</td>
-                        <td>{{ preferred_date }} {{ preferred_time }}</td>
-                        <td><span class="status-badge status-{{ status }}">{{ '承認済' if status == 'approved' else '申請中' }}</span></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% else %}
-            <p style="text-align: center; color: #666; padding: 2rem;">予約申請はありません</p>
-            {% endif %}
-        </div>
-    </main>
-</body>
-</html>
-'''
+    conn.commit()
+    conn.close()
+    
+    flash('予約申請が完了しました。承認をお待ちください。', 'success')
+    return redirect(url_for('dashboard'))
 
+@app.route('/upload_results')
+@login_required
+def upload_results():
+    # 承認済み予約の取得
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, exam_type, preferred_date
+        FROM reservations 
+        WHERE user_id = ? AND status = 'approved'
+        ORDER BY preferred_date DESC
+    ''', (current_user.id,))
+    approved_reservations = c.fetchall()
+    conn.close()
+    
+    return render_template('upload_results.html', reservations=approved_reservations)
+
+@app.route('/submit_results', methods=['POST'])
+@login_required
+def submit_results():
+    reservation_id = request.form.get('reservation_id')
+    if 'result_file' not in request.files:
+        flash('ファイルが選択されていません', 'danger')
+        return redirect(url_for('upload_results'))
+    
+    file = request.files['result_file']
+    if file.filename == '':
+        flash('ファイルが選択されていません', 'danger')
+        return redirect(url_for('upload_results'))
+    
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        save_filename = f"{current_user.id}_{timestamp}_{filename}"
+        filepath = os.path.join(UPLOAD_FOLDER, save_filename)
+        file.save(filepath)
+        
+        conn = sqlite3.connect('health_check.db')
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO exam_results 
+            (reservation_id, file_path) 
+            VALUES (?, ?)
+        ''', (reservation_id, filepath))
+        conn.commit()
+        conn.close()
+        
+        flash('健康診断結果が正常にアップロードされました', 'success')
+        return redirect(url_for('dashboard'))
+    
+    flash('許可されていないファイル形式です', 'danger')
+    return redirect(url_for('upload_results'))
+
+@app.route('/profile')
+@login_required
+def profile():
+    return render_template('profile.html')
+
+@app.route('/update_profile', methods=['POST'])
+@login_required
+def update_profile():
+    email = request.form.get('email')
+    phone = request.form.get('phone')
+    current_password = request.form.get('current_password')
+    new_password = request.form.get('new_password')
+    
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    
+    # パスワード変更の場合
+    if current_password and new_password:
+        c.execute('SELECT password FROM users WHERE id = ?', (current_user.id,))
+        stored_password = c.fetchone()[0]
+        
+        if stored_password != current_password:
+            flash('現在のパスワードが正しくありません', 'danger')
+            conn.close()
+            return redirect(url_for('profile'))
+        
+        c.execute('UPDATE users SET password = ? WHERE id = ?', (new_password, current_user.id))
+        flash('パスワードが更新されました', 'success')
+    
+    # プロフィール情報の更新
+    c.execute('UPDATE users SET email = ?, phone = ? WHERE id = ?', (email, phone, current_user.id))
+    conn.commit()
+    conn.close()
+    
+    flash('プロフィール情報が更新されました', 'success')
+    return redirect(url_for('profile'))
+
+@app.route('/group_reservations')
+@login_required
+def group_reservations():
+    # データベースの構造を確認
+    conn = sqlite3.connect('health_check.db')
+    c = conn.cursor()
+    
+    # 実際のグループ予約テーブル構造を確認
+    c.execute("PRAGMA table_info(reservation_groups)")
+    columns = [column[1] for column in c.fetchall()]
+    
+    # 予約テーブルの構造を確認
+    c.execute("PRAGMA table_info(reservations)")
+    res_columns = [column[1] for column in c.fetchall()]
+    
+    # データベース構造に基づいたダミーデータで表示
+    sample_groups = []
+    
+    # 部署毎のグループ予約の例
+    if current_user.department == '人事部':
+        sample_groups = [
+            (1, '総務部健康診断予約', '総務部', '2023-11-01 10:00:00', '管理者', 5),
+            (2, '営業部健康診断予約', '営業部', '2023-11-05 14:30:00', '管理者', 8),
+            (3, '開発部健康診断予約', '開発部', '2023-11-08 09:15:00', '管理者', 12)
+        ]
+    else:
+        # 自部署のみ
+        sample_groups = [
+            (1, f'{current_user.department}健康診断予約', current_user.department, '2023-11-01 10:00:00', current_user.name, 3)
+        ]
+    
+    conn.close()
+    
+    return render_template('group_reservations.html', group_reservations=sample_groups)
+
+# アプリケーションをローカルホストで実行
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=55110, debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
