@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}メディカル{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1A1A1A;
+            --secondary: #5839de;
+            --accent: #7928CA;
+            --success: #00A67E;
+            --danger: #F03A47;
+            --warning: #FFB84C;
+            --info: #5839de;
+            --light: #F8F9FA;
+            --dark: #111111;
+            --bg-color: #f6f9fc;
+            --text-color: #4a4a4a;
+            --border-color: #edf1f7;
+            --hover-color: #F5F5FF;
+            --gradient-primary: linear-gradient(135deg, #7928CA, #5839de);
+            --gradient-secondary: linear-gradient(135deg, #3a1078, #4e31aa);
+            --gradient-background: linear-gradient(135deg, #f6f9fc 0%, #edf1f7 100%);
+            --shadow-soft: 0 10px 50px rgba(0,0,0,0.05), 0 2px 15px rgba(0,0,0,0.05);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.5;
+            color: var(--text-color);
+            background: var(--gradient-background);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* アニメーションの追加 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animated {
+            animation: fadeIn 0.8s ease-out forwards;
+        }
+
+        .delay-1 {
+            animation-delay: 0.1s;
+        }
+
+        .delay-2 {
+            animation-delay: 0.2s;
+        }
+
+        .delay-3 {
+            animation-delay: 0.3s;
+        }
+
+        header {
+            background: white;
+            border-bottom: 1px solid var(--border-color);
+            padding: 1.25rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.03);
+        }
+
+        .header-container {
+            max-width: 1300px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 2rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 1.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .logo i {
+            margin-right: 0.5rem;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo span {
+            background: var(--gradient-secondary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        nav .nav-links {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        nav .nav-links a {
+            text-decoration: none;
+            color: var(--text-color);
+            font-weight: 500;
+            transition: all 0.2s;
+            padding: 0.5rem 0;
+            position: relative;
+            font-size: 0.95rem;
+        }
+
+        nav .nav-links a:hover {
+            color: var(--accent);
+        }
+
+        nav .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--gradient-primary);
+            transition: width 0.3s;
+        }
+
+        nav .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        nav .nav-links a.active {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        nav .nav-links a.active::after {
+            width: 100%;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 12px;
+            transition: all 0.2s;
+        }
+
+        .user-profile:hover {
+            background-color: var(--hover-color);
+        }
+
+        .user-profile .avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: var(--gradient-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            margin-right: 0.75rem;
+            box-shadow: 0 4px 15px rgba(121, 40, 202, 0.25);
+        }
+
+        .user-profile .user-name {
+            font-weight: 500;
+            color: var(--text-color);
+            max-width: 150px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 0.95rem;
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background-color: white;
+            box-shadow: var(--shadow-soft);
+            border-radius: 16px;
+            min-width: 220px;
+            z-index: 10;
+            display: none;
+            overflow: hidden;
+            animation: fadeIn 0.2s ease;
+            border: 1px solid var(--border-color);
+        }
+
+        .dropdown-menu.active {
+            display: block;
+        }
+
+        .dropdown-menu a {
+            display: flex;
+            align-items: center;
+            padding: 0.85rem 1.25rem;
+            text-decoration: none;
+            color: var(--text-color);
+            transition: all 0.2s;
+            font-size: 0.95rem;
+        }
+
+        .dropdown-menu a i {
+            margin-right: 0.75rem;
+            font-size: 1rem;
+            width: 20px;
+            text-align: center;
+            color: var(--text-color);
+            opacity: 0.7;
+        }
+
+        .dropdown-menu a:hover {
+            background-color: var(--hover-color);
+        }
+
+        .dropdown-menu a:hover i {
+            color: var(--accent);
+            opacity: 1;
+        }
+
+        .dropdown-menu a.logout {
+            color: var(--danger);
+        }
+
+        .dropdown-menu a.logout:hover {
+            background-color: rgba(240, 58, 71, 0.08);
+        }
+
+        .dropdown-menu a.logout:hover i {
+            color: var(--danger);
+        }
+
+        main {
+            flex-grow: 1;
+            max-width: 1300px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 3.5rem 2rem;
+        }
+
+        footer {
+            background-color: white;
+            padding: 3rem 0;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+            color: var(--text-color);
+            opacity: 0.8;
+            font-size: 0.9rem;
+            box-shadow: 0 -2px 15px rgba(0,0,0,0.03);
+        }
+
+        .footer-container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .card { 
+            background: white; 
+            padding: 3rem; 
+            border-radius: 24px; 
+            box-shadow: var(--shadow-soft);
+            margin-bottom: 2.5rem;
+            border: 1px solid var(--border-color);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: var(--gradient-primary);
+            z-index: 2;
+            border-radius: 24px 24px 0 0;
+        }
+
+        .form-group {
+            margin-bottom: 1.75rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.75rem;
+            font-weight: 500;
+            color: var(--text-color);
+            font-size: 0.95rem;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 1rem 1.25rem;
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            font-size: 1rem;
+            color: var(--text-color);
+            transition: all 0.2s ease-in-out;
+            font-family: inherit;
+            background-color: #f9fafd;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(121, 40, 202, 0.15);
+            background-color: white;
+        }
+
+        button {
+            display: inline-block;
+            background: var(--gradient-primary);
+            color: white;
+            border: none;
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+            font-size: 1rem;
+            text-align: center;
+            text-decoration: none;
+            font-family: inherit;
+            box-shadow: 0 4px 15px rgba(121, 40, 202, 0.25);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(121, 40, 202, 0.35);
+        }
+
+        button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 10px rgba(121, 40, 202, 0.25);
+        }
+
+        .button-secondary {
+            background: white;
+            color: var(--accent);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+
+        .button-secondary:hover {
+            background-color: var(--hover-color);
+            color: var(--accent);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+        }
+
+        .alert {
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 2rem;
+            border-radius: 12px;
+            color: var(--text-color);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            border: 1px solid var(--border-color);
+            font-size: 0.95rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.03);
+        }
+
+        .alert i {
+            margin-right: 0.75rem;
+            font-size: 1.1rem;
+        }
+
+        .alert-success {
+            background-color: rgba(0, 166, 126, 0.08);
+            border-color: rgba(0, 166, 126, 0.3);
+        }
+
+        .alert-success i {
+            color: var(--success);
+        }
+
+        .alert-danger {
+            background-color: rgba(240, 58, 71, 0.08);
+            border-color: rgba(240, 58, 71, 0.3);
+        }
+
+        .alert-danger i {
+            color: var(--danger);
+        }
+
+        .alert-warning {
+            background-color: rgba(255, 184, 76, 0.08);
+            border-color: rgba(255, 184, 76, 0.3);
+        }
+
+        .alert-warning i {
+            color: var(--warning);
+        }
+
+        .alert-info {
+            background-color: rgba(90, 0, 236, 0.08);
+            border-color: rgba(90, 0, 236, 0.3);
+        }
+
+        .alert-info i {
+            color: var(--info);
+        }
+
+        @media (max-width: 992px) {
+            header {
+                padding: 1rem 0;
+            }
+
+            .header-container {
+                padding: 0 1.5rem;
+            }
+
+            nav .nav-links {
+                gap: 1.5rem;
+            }
+
+            .user-profile .user-name {
+                max-width: 120px;
+            }
+            
+            main {
+                padding: 2.5rem 1.5rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header-container {
+                flex-direction: column;
+                padding: 1rem;
+            }
+
+            .logo {
+                margin-bottom: 1rem;
+            }
+
+            nav .nav-links {
+                width: 100%;
+                justify-content: center;
+                margin-bottom: 1rem;
+                flex-wrap: wrap;
+                gap: 1rem;
+            }
+
+            .user-profile {
+                width: 100%;
+                justify-content: center;
+            }
+
+            main {
+                padding: 2rem 1rem;
+            }
+
+            .dropdown-menu {
+                width: 100%;
+            }
+            
+            .card {
+                padding: 2rem;
+            }
+        }
+
+        /* Anthropicスタイルの追加クラス */
+        .gradient-text {
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .secondary-gradient-text {
+            background: var(--gradient-secondary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .gradient-button {
+            background: var(--gradient-primary);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(121, 40, 202, 0.25);
+        }
+
+        .gradient-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(121, 40, 202, 0.35);
+        }
+    </style>
+    {% block extra_style %}{% endblock %}
+</head>
+<body>
+    <header>
+        <div class="header-container animated delay-1">
+            <a href="/" class="logo">
+                <i class="fas fa-heartbeat"></i>
+                <span>Medical</span>
+            </a>
+            
+            {% if current_user.is_authenticated %}
+            <nav>
+                <ul class="nav-links">
+                    <li><a href="{{ url_for('dashboard') }}" {% if request.path == url_for('dashboard') %}class="active"{% endif %}>ダッシュボード</a></li>
+                    <li><a href="{{ url_for('reservation') }}" {% if request.path == url_for('reservation') %}class="active"{% endif %}>予約申請</a></li>
+                    <li><a href="{{ url_for('upload_results') }}" {% if request.path == url_for('upload_results') %}class="active"{% endif %}>結果提出</a></li>
+                    {% if current_user.is_admin %}
+                    <li><a href="{{ url_for('admin_dashboard') }}" {% if request.path == url_for('admin_dashboard') %}class="active"{% endif %}>管理画面</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            
+            <div class="user-profile" id="userProfile">
+                <div class="avatar">{{ current_user.name[:1] }}</div>
+                <div class="user-name">{{ current_user.name }} ({{ current_user.department }})</div>
+                <div class="dropdown-menu" id="userMenu">
+                    <a href="{{ url_for('profile') }}"><i class="fas fa-user-circle"></i>プロフィール設定</a>
+                    <a href="{{ url_for('logout') }}" class="logout"><i class="fas fa-sign-out-alt"></i>ログアウト</a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </header>
+    
+    <main class="animated delay-2">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        {% block content %}{% endblock %}
+    </main>
+    
+    <footer class="animated delay-3">
+        <div class="footer-container">
+            <p>&copy; 2025 メディカル - すべての社員の健康をサポート</p>
+        </div>
+    </footer>
+
+    {% if current_user.is_authenticated %}
+    <script>
+        // ユーザープロフィールのドロップダウンメニュー
+        document.getElementById('userProfile').addEventListener('click', function(e) {
+            e.stopPropagation();
+            document.getElementById('userMenu').classList.toggle('active');
+        });
+        
+        document.addEventListener('click', function(e) {
+            if (!document.getElementById('userProfile').contains(e.target)) {
+                document.getElementById('userMenu').classList.remove('active');
+            }
+        });
+    </script>
+    {% endif %}
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

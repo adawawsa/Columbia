@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+
+{% block title %}ダッシュボード{% endblock %}
+
+{% block extra_style %}
+<style>
+.dashboard-header {
+    margin-bottom: 3.5rem;
+    max-width: 850px;
+}
+
+.dashboard-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: 1rem;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+}
+
+.dashboard-header p {
+    color: var(--text-color);
+    opacity: 0.8;
+    font-size: 1.1rem;
+    max-width: 600px;
+    line-height: 1.6;
+}
+
+.dashboard-section {
+    margin-bottom: 4rem;
+}
+
+.section-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    color: var(--primary);
+    letter-spacing: -0.02em;
+}
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2.5rem;
+}
+
+.metric-card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.metric-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+}
+
+.metric-label {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-color);
+    opacity: 0.7;
+    margin-bottom: 0.5rem;
+}
+
+.metric-value {
+    font-size: 3rem;
+    font-weight: 700;
+    color: var(--primary);
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.04em;
+}
+
+.metric-value.highlight {
+    color: var(--accent);
+}
+
+.metric-value.date {
+    font-size: 1.75rem;
+}
+
+.action-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.action-card {
+    display: flex;
+    align-items: flex-start;
+    padding: 1.5rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    text-decoration: none;
+    transition: all 0.2s;
+    background: white;
+}
+
+.action-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+    transform: translateY(-2px);
+}
+
+.action-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background-color: var(--hover-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 1rem;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.action-content h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: 0.5rem;
+}
+
+.action-content p {
+    font-size: 0.95rem;
+    color: var(--text-color);
+    opacity: 0.7;
+    line-height: 1.5;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.data-table thead {
+    background-color: rgba(245, 245, 255, 0.5);
+}
+
+.data-table th {
+    padding: 1rem 1.25rem;
+    font-weight: 600;
+    color: var(--primary);
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    font-size: 0.95rem;
+}
+
+.data-table td {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-color);
+    font-size: 0.95rem;
+}
+
+.data-table tr:last-child td {
+    border-bottom: none;
+}
+
+.data-table tr:hover td {
+    background-color: var(--hover-color);
+}
+
+.table-container {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+    border-radius: 12px;
+    margin-top: 1.5rem;
+}
+
+.table-action {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    background-color: var(--accent);
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.table-action:hover {
+    background-color: var(--secondary);
+    box-shadow: 0 4px 12px rgba(90, 0, 236, 0.2);
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.4rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1;
+}
+
+.status-badge::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+
+.status-approved {
+    background-color: rgba(0, 166, 126, 0.08);
+    color: var(--success);
+}
+
+.status-approved::before {
+    background-color: var(--success);
+}
+
+.status-pending {
+    background-color: rgba(255, 184, 76, 0.08);
+    color: var(--warning);
+}
+
+.status-pending::before {
+    background-color: var(--warning);
+}
+
+.status-rejected {
+    background-color: rgba(240, 58, 71, 0.08);
+    color: var(--danger);
+}
+
+.status-rejected::before {
+    background-color: var(--danger);
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem 0;
+    background-color: white;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.empty-state-icon {
+    width: 60px;
+    height: 60px;
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+    opacity: 0.3;
+}
+
+.empty-state-text {
+    font-size: 1.1rem;
+    color: var(--text-color);
+    opacity: 0.7;
+    text-align: center;
+}
+
+@media (max-width: 768px) {
+    .dashboard-header h1 {
+        font-size: 2rem;
+    }
+    
+    .metrics-grid,
+    .action-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .data-table {
+        display: block;
+        overflow-x: auto;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>あなたの健康管理ダッシュボード</h1>
+    <p>健康診断の予約状況や検査結果をまとめて確認できます。新しい予約の申請や結果の提出もこちらから行えます。</p>
+</div>
+
+<div class="dashboard-section">
+    <h2 class="section-title">ステータス</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">申請中</div>
+            <div class="metric-value">{{ stats.pending }}</div>
+            <div class="metric-desc">処理待ちの予約</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">承認済み</div>
+            <div class="metric-value highlight">{{ stats.approved }}</div>
+            <div class="metric-desc">承認された予約</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">次回予定日</div>
+            <div class="metric-value date">{{ stats.next_exam if stats.next_exam else '未定' }}</div>
+            <div class="metric-desc">次回の健診日</div>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h2 class="section-title">クイックアクション</h2>
+    <div class="action-grid">
+        <a href="{{ url_for('reservation') }}" class="action-card">
+            <div class="action-icon">
+                <i class="fas fa-calendar-plus"></i>
+            </div>
+            <div class="action-content">
+                <h3>新規予約</h3>
+                <p>健康診断の新しい予約を申請します。個人またはグループでの予約が可能です。</p>
+            </div>
+        </a>
+        <a href="{{ url_for('group_reservations') }}" class="action-card">
+            <div class="action-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <div class="action-content">
+                <h3>グループ予約</h3>
+                <p>部署やチーム単位のグループ予約状況を確認します。</p>
+            </div>
+        </a>
+        <a href="{{ url_for('upload_results') }}" class="action-card">
+            <div class="action-icon">
+                <i class="fas fa-file-upload"></i>
+            </div>
+            <div class="action-content">
+                <h3>結果提出</h3>
+                <p>健康診断の結果を提出します。承認済みの予約に対して実施できます。</p>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="dashboard-section">
+    <h2 class="section-title">申請状況</h2>
+    {% if reservations %}
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>申請日</th>
+                    <th>種別</th>
+                    <th>希望日時</th>
+                    <th>ステータス</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for exam_type, preferred_date, preferred_time, status, created_at in reservations %}
+                <tr>
+                    <td>{{ created_at.split(' ')[0] }}</td>
+                    <td>{{ exam_type }}</td>
+                    <td>{{ preferred_date }} {{ preferred_time }}</td>
+                    <td>
+                        <span class="status-badge status-{{ status }}">
+                            {{ '承認済' if status == 'approved' else '却下' if status == 'rejected' else '申請中' }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if status == 'approved' %}
+                        <a href="{{ url_for('upload_results') }}" class="table-action">結果提出</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">
+            <i class="fas fa-clipboard-list fa-3x"></i>
+        </div>
+        <p class="empty-state-text">予約申請はありません</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

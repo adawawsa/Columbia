@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}ログイン | Medical{% endblock %}
+
+{% block extra_style %}
+<style>
+.login-page {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 5% 0;
+}
+
+.login-header {
+    margin-bottom: 3rem;
+    text-align: center;
+}
+
+.login-logo {
+    font-size: 2.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.login-title {
+    font-size: 2.25rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+}
+
+.login-subtitle {
+    font-size: 1.1rem;
+    line-height: 1.5;
+    max-width: 360px;
+    margin: 0 auto;
+}
+
+.login-form {
+    background-color: white;
+    border-radius: 24px;
+    padding: 3rem;
+    box-shadow: var(--shadow-soft);
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+}
+
+.login-form::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 8px;
+    background: var(--gradient-primary);
+    z-index: 2;
+    border-radius: 24px 24px 0 0;
+}
+
+.form-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 2rem;
+    color: var(--primary);
+    letter-spacing: -0.02em;
+}
+
+.remember-me {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2.5rem;
+}
+
+.remember-me input {
+    width: auto;
+    margin-right: 0.5rem;
+    accent-color: var(--accent);
+    transform: scale(1.2);
+}
+
+.login-footer {
+    text-align: center;
+    margin-top: 2rem;
+    font-size: 0.95rem;
+}
+
+@media (max-width: 768px) {
+    .login-form {
+        padding: 2rem;
+        border-radius: 20px;
+    }
+    
+    .login-title {
+        font-size: 1.75rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-page">
+    <div class="login-header animated delay-1">
+        <div class="login-logo gradient-text">
+            <i class="fas fa-heartbeat"></i>
+        </div>
+        <h1 class="login-title secondary-gradient-text">Medical</h1>
+        <p class="login-subtitle">企業健康管理プラットフォーム</p>
+    </div>
+    
+    <div class="login-form animated delay-2">
+        <h2 class="form-title">ログイン</h2>
+        <form action="{{ url_for('login') }}" method="POST">
+            <div class="form-group">
+                <label class="form-label" for="employee_id">社員ID</label>
+                <input class="form-input" type="text" id="employee_id" name="employee_id" placeholder="IDを入力してください" autocomplete="username" required>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="password">パスワード</label>
+                <input class="form-input" type="password" id="password" name="password" placeholder="パスワードを入力してください" autocomplete="current-password" required>
+            </div>
+            
+            <div class="remember-me">
+                <input type="checkbox" id="remember" name="remember">
+                <label for="remember">ログイン状態を保持する</label>
+            </div>
+            
+            <button type="submit" class="gradient-button">ログイン</button>
+        </form>
+    </div>
+    
+    <div class="login-footer animated delay-3">
+        <p>アカウント情報は管理者にお問い合わせください</p>
+    </div>
+</div>
+{% endblock %}

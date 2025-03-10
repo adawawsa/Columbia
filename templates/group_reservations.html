@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}健康診断管理システム - グループ予約{% endblock %}
+
+{% block extra_style %}
+<style>
+.card { 
+    background: white; 
+    padding: 1.5rem; 
+    border-radius: 8px; 
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05); 
+    margin-bottom: 2rem;
+}
+.card h2 {
+    margin-top: 0;
+    color: #4a6cf7;
+    font-weight: 600;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #f0f0f0;
+}
+.action-button { 
+    display: inline-block; 
+    padding: 0.75rem 1.5rem; 
+    background: #4a6cf7; 
+    color: white; 
+    text-decoration: none; 
+    border-radius: 4px; 
+    font-weight: 500;
+    transition: all 0.3s;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.action-button:hover {
+    background: #3b5de7;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+.back-link { 
+    display: inline-block; 
+    margin-bottom: 1.5rem; 
+    color: #4a6cf7;
+    text-decoration: none;
+    font-weight: 500;
+    transition: all 0.3s;
+}
+.back-link:hover {
+    color: #3b5de7;
+    transform: translateX(-3px);
+}
+table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    margin-top: 1rem;
+}
+th, td { 
+    padding: 1rem; 
+    text-align: left; 
+    border-bottom: 1px solid #eee; 
+}
+th {
+    background: #f9fafb;
+    font-weight: 600;
+}
+tr:hover {
+    background: #f9fafb;
+}
+.action-container {
+    text-align: center;
+    margin-top: 2rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('dashboard') }}" class="back-link">← ダッシュボードに戻る</a>
+
+<div class="card">
+    <h2>{{ current_user.department }}のグループ予約一覧</h2>
+    {% if group_reservations %}
+    <table>
+        <thead>
+            <tr>
+                <th>予約名</th>
+                <th>作成者</th>
+                <th>作成日</th>
+                <th>参加人数</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for id, name, dept, created_at, created_by, member_count in group_reservations %}
+            <tr>
+                <td>{{ name }}</td>
+                <td>{{ created_by }}</td>
+                <td>{{ created_at.split(' ')[0] }}</td>
+                <td>{{ member_count }}人</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>グループ予約はありません</p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="action-container">
+    <a href="{{ url_for('reservation') }}" class="action-button">新しいグループ予約を作成する</a>
+</div>
+{% endblock %}

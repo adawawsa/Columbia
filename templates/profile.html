@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}健康診断管理システム - プロフィール設定{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 700px; margin: 0 auto;">
+    <h2 style="margin-top: 0; color: #4a6cf7; font-weight: 600; padding-bottom: 0.5rem; border-bottom: 2px solid #f0f0f0; margin-bottom: 2rem;">
+        プロフィール設定
+    </h2>
+
+    <form action="{{ url_for('update_profile') }}" method="POST">
+        <div class="form-group">
+            <label for="employee_id">社員ID</label>
+            <input type="text" id="employee_id" name="employee_id" value="{{ current_user.id }}" readonly class="form-control" style="background-color: #f5f5f5;">
+        </div>
+
+        <div class="form-group">
+            <label for="name">氏名</label>
+            <input type="text" id="name" name="name" value="{{ current_user.name }}" readonly class="form-control" style="background-color: #f5f5f5;">
+        </div>
+
+        <div class="form-group">
+            <label for="department">所属部署</label>
+            <input type="text" id="department" name="department" value="{{ current_user.department }}" readonly class="form-control" style="background-color: #f5f5f5;">
+        </div>
+
+        <div class="form-group">
+            <label for="email">メールアドレス</label>
+            <input type="email" id="email" name="email" value="{{ current_user.email or '' }}" class="form-control">
+        </div>
+
+        <div class="form-group">
+            <label for="phone">電話番号</label>
+            <input type="tel" id="phone" name="phone" value="{{ current_user.phone or '' }}" class="form-control">
+        </div>
+
+        <h3 style="margin-top: 2rem; margin-bottom: 1rem; color: #4a6cf7; font-weight: 600; font-size: 1.25rem;">
+            パスワード変更
+        </h3>
+
+        <div class="form-group">
+            <label for="current_password">現在のパスワード</label>
+            <input type="password" id="current_password" name="current_password" class="form-control">
+        </div>
+
+        <div class="form-group">
+            <label for="new_password">新しいパスワード</label>
+            <input type="password" id="new_password" name="new_password" class="form-control">
+        </div>
+
+        <div style="margin-top: 2rem; text-align: center;">
+            <button type="submit" class="btn btn-primary">保存する</button>
+            <a href="{{ url_for('dashboard') }}" style="display: inline-block; margin-left: 1rem; color: #6c757d; text-decoration: none;">キャンセル</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

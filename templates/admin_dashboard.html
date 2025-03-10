@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+
+{% block title %}健康診断管理システム - 管理者ダッシュボード{% endblock %}
+
+{% block extra_style %}
+<style>
+.card h2 {
+    margin-top: 0;
+    color: #4a6cf7;
+    font-weight: 600;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #f0f0f0;
+}
+.card h3 {
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    color: #4a6cf7;
+    font-weight: 600;
+    font-size: 1.25rem;
+}
+.tabs {
+    display: flex;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid #eee;
+    flex-wrap: wrap;
+}
+.tab {
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    font-weight: 500;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+.tab:hover {
+    color: #4a6cf7;
+}
+.tab.active {
+    border-bottom-color: #4a6cf7;
+    color: #4a6cf7;
+}
+.tab-content {
+    display: none;
+}
+.tab-content.active {
+    display: block;
+}
+table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    margin-top: 1rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    border-radius: 8px;
+    overflow: hidden;
+}
+th, td { 
+    padding: 1rem; 
+    text-align: left; 
+    border-bottom: 1px solid #eee; 
+}
+th {
+    background: #f9fafb;
+    font-weight: 600;
+    color: #4b5563;
+}
+tr:hover {
+    background: #f9fafb;
+}
+tr:last-child td {
+    border-bottom: none;
+}
+.btn { 
+    display: inline-block; 
+    padding: 0.5rem 1rem; 
+    border-radius: 4px; 
+    text-decoration: none; 
+    margin-right: 0.5rem; 
+    font-weight: 500;
+    transition: all 0.3s;
+}
+.btn-approve { 
+    background: #4ade80; 
+    color: white; 
+}
+.btn-approve:hover {
+    background: #22c55e;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.btn-reject { 
+    background: #f87171; 
+    color: white; 
+}
+.btn-reject:hover {
+    background: #ef4444;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.btn-view {
+    background: #60a5fa;
+    color: white;
+}
+.btn-view:hover {
+    background: #3b82f6;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.btn-mark {
+    background: #a78bfa;
+    color: white;
+}
+.btn-mark:hover {
+    background: #8b5cf6;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.file-icon {
+    width: 24px;
+    height: 24px;
+    color: #6b7280;
+}
+.file-name {
+    font-weight: 500;
+    color: #4b5563;
+}
+.file-type {
+    font-size: 0.875rem;
+    color: #9ca3af;
+}
+.comments {
+    font-style: italic;
+    color: #6b7280;
+    margin-top: 0.5rem;
+}
+.department-section {
+    margin-bottom: 2rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.department-header {
+    background: #f3f4f6;
+    padding: 1rem;
+    font-weight: 600;
+    color: #4b5563;
+    border-bottom: 1px solid #e5e7eb;
+}
+.department-content {
+    padding: 0;
+}
+.department-content table {
+    margin-top: 0;
+    border-radius: 0;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tabs">
+    <div class="tab active" onclick="switchTab('reservations')">予約申請一覧</div>
+    <div class="tab" onclick="switchTab('results')">健診結果一覧</div>
+    <div class="tab" onclick="switchTab('employee_status')">社員予約状況</div>
+</div>
+
+<div id="reservations" class="tab-content card active">
+    <h2>予約申請一覧</h2>
+    {% if reservations %}
+    <table>
+        <thead>
+            <tr>
+                <th>申請日</th>
+                <th>社員名</th>
+                <th>所属</th>
+                <th>健診種別</th>
+                <th>希望日時</th>
+                <th>ステータス</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for reservation in reservations %}
+            <tr>
+                <td>{{ reservation[5].split(' ')[0] }}</td>
+                <td>{{ reservation[6] }}</td>
+                <td>{{ reservation[7] }}</td>
+                <td>{{ reservation[1] }}</td>
+                <td>{{ reservation[2] }} {{ reservation[3] }}</td>
+                <td>
+                    <span class="status {% if reservation[4] == 'approved' %}status-approved{% elif reservation[4] == 'rejected' %}status-rejected{% else %}status-pending{% endif %}">
+                        {{ '承認済' if reservation[4] == 'approved' else '却下' if reservation[4] == 'rejected' else '申請中' }}
+                    </span>
+                </td>
+                <td>
+                    {% if reservation[4] == 'pending' %}
+                    <a href="{{ url_for('approve_reservation', reservation_id=reservation[0]) }}" class="btn btn-approve">承認</a>
+                    <a href="{{ url_for('reject_reservation', reservation_id=reservation[0]) }}" class="btn btn-reject">却下</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <p>予約申請はありません</p>
+    </div>
+    {% endif %}
+</div>
+
+<div id="results" class="tab-content card">
+    <h2>健診結果一覧</h2>
+    {% if exam_results %}
+    <table>
+        <thead>
+            <tr>
+                <th>提出日</th>
+                <th>社員名</th>
+                <th>所属</th>
+                <th>健診種別</th>
+                <th>健診日</th>
+                <th>ファイル</th>
+                <th>確認状況</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for result in exam_results %}
+            <tr>
+                <td>{{ result[3].split(' ')[0] }}</td>
+                <td>{{ result[5] }}</td>
+                <td>{{ result[6] }}</td>
+                <td>{{ result[7] }}</td>
+                <td>{{ result[8] }}</td>
+                <td>
+                    <div class="file-info">
+                        <svg class="file-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                        <div>
+                            <div class="file-name">{{ result[2].split('/')[-1] }}</div>
+                            {% if result[7] %}
+                            <div class="comments">{{ result[7] }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <span class="status {% if result[4] == 'reviewed' %}status-approved{% else %}status-pending{% endif %}">
+                        {{ '確認済' if result[4] == 'reviewed' else '未確認' }}
+                    </span>
+                </td>
+                <td>
+                    <button class="btn btn-view" onclick="alert('この機能は現在実装中です')">結果を確認</button>
+                    {% if result[4] != 'reviewed' %}
+                    <button class="btn btn-mark" onclick="alert('この機能は現在実装中です')">確認済みにする</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+        <p>健診結果はありません</p>
+    </div>
+    {% endif %}
+</div>
+
+<div id="employee_status" class="tab-content card">
+    <h2>社員予約状況</h2>
+    {% if employee_status %}
+        {% for department, employees in employee_status.items() %}
+        <div class="department-section">
+            <div class="department-header">{{ department }}</div>
+            <div class="department-content">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>社員名</th>
+                            <th>勤務形態</th>
+                            <th>最新の健診</th>
+                            <th>健診種別</th>
+                            <th>ステータス</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for emp in employees %}
+                        <tr>
+                            <td>{{ emp[1] }}</td>
+                            <td>{{ '深夜勤務' if emp[3] == 'night' else '通常勤務' }}</td>
+                            <td>{{ emp[5] if emp[5] else '未実施' }}</td>
+                            <td>{{ emp[6] if emp[6] else '-' }}</td>
+                            <td>
+                                <span class="status {% if emp[4] > 0 %}status-approved{% else %}status-none{% endif %}">
+                                    {{ '健診済' if emp[4] > 0 else '未健診' }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+    <div class="empty-state">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+        <p>社員情報が見つかりません</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function switchTab(tabId) {
+        // Hide all tab contents
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        
+        // Deactivate all tabs
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        // Activate the selected tab and content
+        document.getElementById(tabId).classList.add('active');
+        document.querySelector(`.tab[onclick="switchTab('${tabId}')"]`).classList.add('active');
+    }
+</script>
+{% endblock %}
